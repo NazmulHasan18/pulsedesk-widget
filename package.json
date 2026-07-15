@@ -1,0 +1,18 @@
+{
+  "name": "pulsedesk-widget",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "esbuild src/widget.ts --bundle --minify --target=es2018 --outfile=dist/widget.js && esbuild src/widget.ts --bundle --target=es2018 --outfile=dist/widget.debug.js",
+    "watch": "esbuild src/widget.ts --bundle --target=es2018 --outfile=dist/widget.debug.js --watch",
+    "typecheck": "tsc --noEmit --target es2020 --lib es2020,dom --strict src/widget.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "typescript": "^7.0.2"
+  }
+}

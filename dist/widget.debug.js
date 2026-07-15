@@ -373,9 +373,18 @@
     const fallback = document.querySelector("script[data-site-id]");
     return (_a = fallback == null ? void 0 : fallback.getAttribute("data-site-id")) != null ? _a : null;
   }
-  function resolveConfig(siteId) {
+  function getUserId() {
+    var _a;
+    const current = document.currentScript;
+    const fromCurrent = current == null ? void 0 : current.getAttribute("data-site-user-id");
+    if (fromCurrent) return fromCurrent;
+    const fallback = document.querySelector("script[data-site-user-id]");
+    return (_a = fallback == null ? void 0 : fallback.getAttribute("data-site-user-id")) != null ? _a : null;
+  }
+  function resolveConfig(siteId, userId) {
     return {
       siteId,
+      userId,
       companyId: `company_${siteId}`,
       companyName: "PulseDesk Demo Co.",
       brandColor: "#4B4FE0",
@@ -556,7 +565,12 @@
       console.error("[PulseDesk] Missing data-site-id on the widget <script> tag.");
       return;
     }
-    const config = resolveConfig(siteId);
+    const userId = getUserId();
+    if (!userId) {
+      console.error("[PulseDesk] Missing data-site-id on the widget <script> tag.");
+      return;
+    }
+    const config = resolveConfig(siteId, userId);
     const connection = createMockConnection(config);
     const host = document.createElement("div");
     host.id = "pulsedesk-widget-root";

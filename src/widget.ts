@@ -269,12 +269,12 @@ function mountWidget(root: ShadowRoot, config: WidgetConfig, connection: Connect
 function init() {
   const siteId = getSiteId();
   if (!siteId) {
-    console.error("[PulseDesk] Missing data-site-id on the widget <script> tag.");
+    console.error("[PulseDesk-widget] Missing data-site-id on the widget <script> tag.");
     return;
   }
   const userId = getUserId();
   if (!userId) {
-    console.error("[PulseDesk] Missing data-site-user-id on the widget <script> tag.");
+    console.error("[PulseDesk-widget] Missing data-site-user-id on the widget <script> tag.");
     return;
   }
 

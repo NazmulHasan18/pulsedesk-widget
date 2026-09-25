@@ -567,7 +567,7 @@
     }
     const userId = getUserId();
     if (!userId) {
-      console.error("[PulseDesk] Missing data-site-id on the widget <script> tag.");
+      console.error("[PulseDesk] Missing data-site-user-id on the widget <script> tag.");
       return;
     }
     const config = resolveConfig(siteId, userId);

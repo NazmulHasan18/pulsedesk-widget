@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "packageManager": "pnpm@12.3.4",
   "scripts": {
     "build": "esbuild src/widget.ts --bundle --minify --target=es2018 --outfile=dist/widget.js && esbuild src/widget.ts --bundle --target=es2018 --outfile=dist/widget.debug.js",
     "watch": "esbuild src/widget.ts --bundle --target=es2018 --outfile=dist/widget.debug.js --watch",

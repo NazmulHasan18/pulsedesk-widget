@@ -1,7 +1,9 @@
-# PulseDesk Widget
+# PulseDesk widget
 
-Standalone embeddable chat widget. Separate build from the main Next.js app
-(landing page / dashboard / super-admin) on purpose — see rationale below.
+This is the canonical source repository for the embeddable widget. It builds
+`dist/widget.js` (minified release) and `dist/widget.debug.js` (local demo).
+The Next.js frontend does not maintain a second widget source or `public/widget.js`.
+Publish the generated `dist/widget.js` to the configured static host/CDN.
 
 ## Why this is a separate package
 
@@ -39,14 +41,20 @@ dist/
 ## Run the demo
 
 ```bash
-npm install
-npm run build      # esbuild -> dist/widget.js + dist/widget.debug.js
-npx serve .         # or any static server; open demo/index.html
+pnpm install
+pnpm build
+npx serve .         # then open demo/index.html
 ```
 
 Reload the demo page a few times — presence randomly resolves to
 "Agent online" (signal/green) or "AI assistant" (amber), matching the
 status language from HANDOFF.md §4.
+
+The demo uses the mock transport. `data-site-id` and `data-site-user-id` are
+required by this pre-MVP mock; guest sessions and live API/realtime startup are
+later milestones. API/socket bases are injected at widget build time from the
+widget repository's `.env` file; customer embed snippets only provide
+`data-site-id`.
 
 ## What's real vs. mocked right now
 
@@ -56,7 +64,7 @@ status language from HANDOFF.md §4.
 | `data-site-id` parsing | **Real** |
 | Config resolution (`resolveConfig` in `widget.ts`) | **Mocked** — hardcoded company name/branding |
 | Presence + messages (`mock-connection.ts`) | **Mocked** — random presence, canned AI replies, fake typing delays |
-| Socket.io connection | **Not implemented** — backend doesn't exist yet (HANDOFF.md §6.3) |
+| Socket.io connection | **Not implemented** — backend realtime integration is still in progress |
 
 ## Swapping in the real backend
 
@@ -107,6 +115,6 @@ talks to the `Connection` interface, never to the mock directly.
 ## npm scripts
 
 ```bash
-npm run build     # one-shot production + debug bundle
-npm run watch     # rebuild on change (debug build only)
+pnpm build        # one-shot production + debug bundle
+pnpm watch        # rebuild on change (debug build only)
 ```

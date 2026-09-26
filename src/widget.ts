@@ -6,7 +6,8 @@ import type { ChatMessage, Connection, PresenceStatus, WidgetConfig, WidgetState
  * PulseDesk embeddable widget.
  *
  * Usage (see demo/index.html):
- *   <script src="https://cdn.pulsedesk.io/widget.js" data-site-id="site_abc123" async></script>
+ *   <script src="https://your-widget-cdn.example/widget.js"
+ *     data-site-id="site_abc123" async></script>
  *
  * Design notes:
  * - Functional composition throughout (factories + closures), no classes,
@@ -24,8 +25,12 @@ import type { ChatMessage, Connection, PresenceStatus, WidgetConfig, WidgetState
  *   the Company model / widget config endpoint exists.
  */
 
-const API_BASE = "https://api.pulsedesk.io"; // placeholder — not live yet
-const SOCKET_BASE = "wss://realtime.pulsedesk.io"; // placeholder — not live yet
+// Injected at build time by scripts/build.mjs. These are public endpoint URLs,
+// not credentials or tenant secrets.
+declare const __PULSEDESK_API_BASE__: string;
+declare const __PULSEDESK_SOCKET_BASE__: string;
+const API_BASE = __PULSEDESK_API_BASE__;
+const SOCKET_BASE = __PULSEDESK_SOCKET_BASE__;
 
 function getSiteId(): string | null {
   const current = document.currentScript as HTMLScriptElement | null;

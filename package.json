@@ -7,13 +7,15 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
-    "typecheck": "tsc --noEmit --target es2020 --lib es2020,dom --strict src/widget.ts"
+    "typecheck": "tsc --noEmit --target es2020 --lib es2020,dom --strict src/widget.ts",
+    "lint": "oxlint src"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "esbuild": "^0.28.1",
+    "oxlint": "^1.85.0",
     "typescript": "^7.0.2"
   }
 }

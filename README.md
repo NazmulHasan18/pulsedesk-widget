@@ -43,6 +43,8 @@ dist/
 ```bash
 pnpm install
 pnpm build
+pnpm typecheck
+pnpm lint
 npx serve .         # then open demo/index.html
 ```
 
@@ -115,6 +117,8 @@ talks to the `Connection` interface, never to the mock directly.
 ## npm scripts
 
 ```bash
-pnpm build        # one-shot production + debug bundle
-pnpm watch        # rebuild on change (debug build only)
+pnpm build      # one-shot production + debug bundle
+pnpm typecheck  # TypeScript validation without generating output
+pnpm lint       # Source lint validation for widget source
+pnpm watch      # rebuild on change (debug build only)
 ```

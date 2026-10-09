@@ -29,7 +29,7 @@ import type { ChatMessage, Connection, PresenceStatus, WidgetConfig, WidgetState
 // not credentials or tenant secrets.
 declare const __PULSEDESK_API_BASE__: string;
 declare const __PULSEDESK_SOCKET_BASE__: string;
-const API_BASE = __PULSEDESK_API_BASE__;
+const _API_BASE = __PULSEDESK_API_BASE__;
 const SOCKET_BASE = __PULSEDESK_SOCKET_BASE__;
 
 function getSiteId(): string | null {

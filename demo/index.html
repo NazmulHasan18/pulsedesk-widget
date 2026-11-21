@@ -43,25 +43,15 @@
       </div>
       <h1>Welcome to Acme Co.</h1>
       <p>
-        We sell things. If you have a question, click the chat bubble in the corner — it'll simulate
-        connecting you to either a live agent or our AI assistant (random on each page load, mirroring how
-        presence will work once the real backend exists).
+        We sell things. If you have a question, click the chat bubble in the corner — in this offline
+        demo it answers with scripted replies.
       </p>
     </div>
 
-    <!-- This is the actual integration snippet a PulseDesk customer would paste,
-       matching what embed-section.tsx shows on the landing page. -->
-    <!-- <script
-      src="../dist/widget.debug.js"
-      data-site-id="site_abc123"
-      data-site-user-id="dummy_user_123"
-      async
-    ></script> -->
-    <script
-      src="https://pulsedesk-widget.vercel.app/widget.debug.js"
-      data-site-id="site_abc123"
-      data-site-user-id="dummy_user_123"
-      async
-    ></script>
+    <!-- The integration snippet a PulseDesk customer pastes is just:
+         <script src="https://<widget host>/widget.js" data-site-id="YOUR_SITE_ID" async></script>
+       data-demo="true" below runs the offline mock. Remove it and use a real
+       site id to talk to a running backend. -->
+    <script src="../dist/widget.debug.js" data-site-id="site_demo" data-demo="true" async></script>
   </body>
 </html>

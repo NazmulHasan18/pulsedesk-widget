@@ -1,97 +1,71 @@
-import type { ChatMessage, Connection, PresenceStatus, WidgetConfig } from "./types";
+import type { ChatMessage, Connection, ConnectionSnapshot, WidgetConfig } from "./types";
 
 /**
- * MOCK transport — stands in for the real Socket.io connection described
- * in HANDOFF.md §6.3 (realtime layer, not yet built) and §6.4 (RAG /
- * Groq generation, not yet built).
- *
- * Functional factory pattern (closures over listeners + a fake queue),
- * matching the project's preference for functional over class-based code.
- *
- * Swap: create real-connection.ts implementing the same `Connection`
- * shape using socket.io-client, scoped by config.siteId -> companyId,
- * and swap the import in widget.ts. No other file needs to change.
+ * Offline demo transport: no backend, scripted replies. Used only when the
+ * script tag has data-demo="true" (see widget.ts). Real sites use
+ * real-connection.ts.
  */
 export function createMockConnection(config: WidgetConfig): Connection {
-  let presenceListeners: ((status: PresenceStatus) => void)[] = [];
-  let messageListeners: ((msg: ChatMessage) => void)[] = [];
-  let typingListeners: ((isTyping: boolean) => void)[] = [];
+  let snapshot: ConnectionSnapshot = {
+    status: "idle",
+    agentsOnline: config.agentsOnline,
+    agentName: null,
+    messages: [],
+    remoteTyping: false,
+  };
+  const listeners: ((s: ConnectionSnapshot) => void)[] = [];
   let timers: ReturnType<typeof setTimeout>[] = [];
 
-  const emitPresence = (status: PresenceStatus) => {
-    presenceListeners.forEach((cb) => cb(status));
-  };
-
-  const emitMessage = (msg: ChatMessage) => {
-    messageListeners.forEach((cb) => cb(msg));
-  };
-
-  const emitTyping = (isTyping: boolean) => {
-    typingListeners.forEach((cb) => cb(isTyping));
+  const update = (patch: Partial<ConnectionSnapshot>) => {
+    snapshot = { ...snapshot, ...patch };
+    listeners.forEach((cb) => cb(snapshot));
   };
 
   const schedule = (fn: () => void, delayMs: number) => {
-    const t = setTimeout(fn, delayMs);
-    timers.push(t);
-    return t;
+    timers.push(setTimeout(fn, delayMs));
   };
 
-  const connect = () => {
-    emitPresence("connecting");
-    // Simulates: POST /api/widget/session { siteId } -> { companyId, agentsOnline }
-    schedule(() => {
-      const agentOnline = Math.random() > 0.5;
-      emitPresence(agentOnline ? "agent-online" : "ai-only");
-      emitMessage({
-        id: crypto.randomUUID(),
-        role: "ai",
-        text: config.welcomeMessage,
-        createdAt: Date.now(),
-      });
-    }, 500);
-  };
+  const add = (msg: Omit<ChatMessage, "id" | "createdAt" | "status">) =>
+    update({
+      messages: [
+        ...snapshot.messages,
+        { ...msg, id: `mock-${Math.random().toString(36).slice(2)}`, createdAt: Date.now(), status: "sent" },
+      ],
+    });
 
-  const disconnect = () => {
-    timers.forEach(clearTimeout);
-    timers = [];
+  const activate = () => {
+    if (snapshot.status !== "idle") return;
+    update({ status: "connecting" });
+    schedule(() => update({ status: "online", agentsOnline: Math.random() > 0.5 }), 500);
   };
 
   const sendMessage = (text: string) => {
-    emitMessage({
-      id: crypto.randomUUID(),
-      role: "visitor",
-      text,
-      createdAt: Date.now(),
-    });
-
-    // Simulates: server routes to a claimed agent, or falls back to the
-    // AI (pgvector similarity search over FaqDoc -> Groq generation).
-    emitTyping(true);
-    const replyDelay = 900 + Math.min(text.length * 20, 1800);
-    schedule(() => {
-      emitTyping(false);
-      emitMessage({
-        id: crypto.randomUUID(),
-        role: "ai",
-        text: mockReply(text, config.companyName),
-        createdAt: Date.now(),
-      });
-    }, replyDelay);
-  };
-
-  const setVisitorTyping = (_isTyping: boolean) => {
-    // No-op for the mock — a real transport would emit a "typing" event
-    // over the socket so an agent's inbox can show it live.
+    add({ role: "visitor", text, unread: false });
+    update({ remoteTyping: true });
+    schedule(
+      () => {
+        update({ remoteTyping: false });
+        add({ role: "ai", text: mockReply(text, config.displayName), unread: true });
+      },
+      900 + Math.min(text.length * 20, 1800),
+    );
   };
 
   return {
-    connect,
-    disconnect,
+    start: () => undefined,
+    activate,
     sendMessage,
-    setVisitorTyping,
-    onPresence: (cb) => presenceListeners.push(cb),
-    onMessage: (cb) => messageListeners.push(cb),
-    onRemoteTyping: (cb) => typingListeners.push(cb),
+    retry: () => undefined,
+    setVisitorTyping: () => undefined,
+    markRead: () => update({ messages: snapshot.messages.map((m) => ({ ...m, unread: false })) }),
+    subscribe: (cb) => {
+      listeners.push(cb);
+      cb(snapshot);
+    },
+    stop: () => {
+      timers.forEach(clearTimeout);
+      timers = [];
+    },
   };
 }
 

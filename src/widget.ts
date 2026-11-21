@@ -1,81 +1,52 @@
 import { CSS } from "./styles";
+import { createWidgetApi } from "./api";
+import { createRealConnection } from "./real-connection";
 import { createMockConnection } from "./mock-connection";
-import type { ChatMessage, Connection, PresenceStatus, WidgetConfig, WidgetState } from "./types";
+import type { ChatMessage, Connection, ConnectionSnapshot, WidgetConfig } from "./types";
 
 /**
  * PulseDesk embeddable widget.
  *
- * Usage (see demo/index.html):
- *   <script src="https://your-widget-cdn.example/widget.js"
- *     data-site-id="site_abc123" async></script>
+ *   <script src="https://<widget host>/widget.js" data-site-id="site_abc123" async></script>
  *
- * Design notes:
- * - Functional composition throughout (factories + closures), no classes,
- *   matching the project's stated preference for functional over
- *   class-based patterns.
- * - Renders into a closed-ish Shadow DOM so host-page CSS can never bleed
- *   in or out. `:host` carries all design tokens (see styles.ts).
- * - Talks to a `Connection` (types.ts). Today that's createMockConnection;
- *   swap to a real socket.io-client implementation once the realtime
- *   backend (HANDOFF.md §6.3) exists — nothing in this file changes
- *   except the import.
- * - Config resolution (site-id -> companyId, branding, welcome message)
- *   is mocked below in resolveConfig(). Replace with a real
- *   `fetch(\`${API_BASE}/api/widget/config?siteId=...\`)` once
- *   the Company model / widget config endpoint exists.
+ * - Renders into a Shadow DOM so host-page CSS can never bleed in or out.
+ * - Loads the company's public config, then talks to the PulseDesk API and
+ *   Socket.io through real-connection.ts. data-demo="true" uses an offline
+ *   mock instead (no backend needed).
  */
 
-// Injected at build time by scripts/build.mjs. These are public endpoint URLs,
-// not credentials or tenant secrets.
+// Injected at build time by scripts/build.mjs. Public endpoint URLs only.
 declare const __PULSEDESK_API_BASE__: string;
 declare const __PULSEDESK_SOCKET_BASE__: string;
-const _API_BASE = __PULSEDESK_API_BASE__;
+const API_BASE = __PULSEDESK_API_BASE__;
 const SOCKET_BASE = __PULSEDESK_SOCKET_BASE__;
 
-function getSiteId(): string | null {
-  const current = document.currentScript as HTMLScriptElement | null;
-  const fromCurrent = current?.getAttribute("data-site-id");
-  if (fromCurrent) return fromCurrent;
-  // Fallback for environments where currentScript isn't reliable
-  // (e.g. dynamically injected/async loaders).
-  const fallback = document.querySelector<HTMLScriptElement>("script[data-site-id]");
-  return fallback?.getAttribute("data-site-id") ?? null;
-}
-function getUserId(): string | null {
-  const current = document.currentScript as HTMLScriptElement | null;
-  const fromCurrent = current?.getAttribute("data-site-user-id");
-  if (fromCurrent) return fromCurrent;
-  // Fallback for environments where currentScript isn't reliable
-  // (e.g. dynamically injected/async loaders).
-  const fallback = document.querySelector<HTMLScriptElement>("script[data-site-user-id]");
-  return fallback?.getAttribute("data-site-user-id") ?? null;
+// document.currentScript is only set while this script first runs, so read it now.
+const scriptTag =
+  (document.currentScript as HTMLScriptElement | null) ??
+  document.querySelector<HTMLScriptElement>("script[data-site-id]");
+
+const LOG_PREFIX = "[PulseDesk-widget]";
+
+interface UiState {
+  open: boolean;
+  draft: string;
+  snapshot: ConnectionSnapshot;
 }
 
-/**
- * MOCK config resolution. Real version: single fetch to the Company
- * table by siteId, returning companyId + branding + welcome copy.
- */
-function resolveConfig(siteId: string, userId: string): WidgetConfig {
-  return {
-    siteId,
-    userId,
-    companyId: `company_${siteId}`,
-    companyName: "PulseDesk Demo Co.",
-    brandColor: "#4B4FE0",
-    welcomeMessage: "Hi! 👋 Ask me anything — I'll get you to a human if needed.",
-    socketUrl: `${SOCKET_BASE}/?siteId=${siteId}`,
-  };
+// ---- small helpers -----------------------------------------------------------
+
+function escapeHtml(text: string): string {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
 }
 
-function createInitialState(): WidgetState {
-  return {
-    open: false,
-    presence: "connecting",
-    messages: [],
-    visitorTyping: false,
-    remoteTyping: false,
-    unread: 0,
-  };
+// Darkens a #RRGGBB colour for hover/focus states.
+function shade(hex: string, factor: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const channel = (shift: number) => Math.round(((n >> shift) & 0xff) * factor);
+  return `#${[16, 8, 0].map((s) => channel(s).toString(16).padStart(2, "0")).join("")}`;
 }
 
 function svgChatIcon(): string {
@@ -96,42 +67,47 @@ function svgCloseIcon(): string {
   </svg>`;
 }
 
-function presencePill(status: PresenceStatus): string {
-  if (status === "agent-online") {
-    return `<span class="pill agent"><span class="pill-dot"></span>Agent online</span>`;
-  }
-  if (status === "ai-only") {
-    return `<span class="pill ai"><span class="pill-dot"></span>AI assistant</span>`;
-  }
-  if (status === "connecting") {
-    return `<span class="pill connecting"><span class="pill-dot"></span>Connecting…</span>`;
-  }
-  return `<span class="pill connecting"><span class="pill-dot"></span>Offline</span>`;
+function presencePill(s: ConnectionSnapshot): string {
+  const pill = (kind: string, label: string) =>
+    `<span class="pill ${kind}"><span class="pill-dot"></span>${escapeHtml(label)}</span>`;
+
+  if (s.status === "connecting") return pill("connecting", "Connecting…");
+  if (s.status === "reconnecting") return pill("connecting", "Reconnecting…");
+  if (s.status === "error") return pill("connecting", "Chat unavailable");
+  if (s.agentName) return pill("agent", `${s.agentName} is here`);
+  if (s.agentsOnline) return pill("agent", "Agent online");
+  return pill("away", "Away · we'll reply soon");
 }
 
-function senderLabel(msg: ChatMessage): string {
-  if (msg.role === "agent") return "Agent";
+function senderLabel(msg: ChatMessage, agentName: string | null): string {
+  if (msg.role === "agent") return agentName ?? "Agent";
   if (msg.role === "ai") return "AI Assistant";
   return "";
 }
 
-function escapeHtml(text: string): string {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
+function messageMeta(msg: ChatMessage): string {
+  if (msg.status === "sending") return `<span class="meta">Sending…</span>`;
+  if (msg.status === "failed") {
+    return `<span class="meta failed">Not sent · <button type="button" class="retry-btn" data-retry="${escapeHtml(
+      msg.id,
+    )}">Retry</button></span>`;
+  }
+  return "";
 }
 
-/**
- * Builds the widget DOM once and returns a `render(state)` function that
- * does targeted updates. Keeps this framework-free without diffing the
- * whole tree on every keystroke.
- */
+// ---- UI ------------------------------------------------------------------------
+
 function mountWidget(root: ShadowRoot, config: WidgetConfig, connection: Connection) {
-  let state = createInitialState();
+  let state: UiState = { open: false, draft: "", snapshot: { status: "idle", agentsOnline: false, agentName: null, messages: [], remoteTyping: false } };
 
   const style = document.createElement("style");
   style.textContent = CSS;
   root.appendChild(style);
+
+  const host = root.host as HTMLElement;
+  host.style.setProperty("--indigo", config.primaryColor);
+  host.style.setProperty("--indigo-dark", shade(config.primaryColor, 0.78));
+  host.style.setProperty("--indigo-tint", config.secondaryColor);
 
   const wrapper = document.createElement("div");
   wrapper.innerHTML = `
@@ -139,17 +115,18 @@ function mountWidget(root: ShadowRoot, config: WidgetConfig, connection: Connect
       ${svgChatIcon()}
       <span class="badge" hidden></span>
     </button>
-    <div class="panel" role="dialog" aria-label="${escapeHtml(config.companyName)} chat">
+    <div class="panel" role="dialog" aria-label="${escapeHtml(config.displayName)} chat">
       <div class="header">
         <div class="header-info">
-          <span class="company-name">${escapeHtml(config.companyName)}</span>
+          <span class="company-name">${escapeHtml(config.displayName)}</span>
           <span class="presence-pill"></span>
         </div>
         <button class="close-btn" type="button" aria-label="Close chat">${svgCloseIcon()}</button>
       </div>
+      <div class="banner" hidden>We couldn't connect to chat. Your messages will be sent when we're back.</div>
       <div class="messages" aria-live="polite"></div>
       <div class="composer">
-        <textarea rows="1" placeholder="Type a message…" aria-label="Message"></textarea>
+        <textarea rows="1" placeholder="Type a message…" aria-label="Message" maxlength="5000"></textarea>
         <button class="send-btn" type="button" aria-label="Send message" disabled>${svgSendIcon()}</button>
       </div>
       <div class="footer-note">Powered by PulseDesk</div>
@@ -161,71 +138,93 @@ function mountWidget(root: ShadowRoot, config: WidgetConfig, connection: Connect
   const badge = wrapper.querySelector<HTMLSpanElement>(".badge")!;
   const panel = wrapper.querySelector<HTMLDivElement>(".panel")!;
   const presencePillEl = wrapper.querySelector<HTMLSpanElement>(".presence-pill")!;
+  const banner = wrapper.querySelector<HTMLDivElement>(".banner")!;
   const closeBtn = wrapper.querySelector<HTMLButtonElement>(".close-btn")!;
   const messagesEl = wrapper.querySelector<HTMLDivElement>(".messages")!;
   const textarea = wrapper.querySelector<HTMLTextAreaElement>("textarea")!;
   const sendBtn = wrapper.querySelector<HTMLButtonElement>(".send-btn")!;
 
-  function setState(patch: Partial<WidgetState>) {
-    state = { ...state, ...patch };
-    render();
-  }
-
   function renderMessages() {
+    const { messages, remoteTyping, agentName, status } = state.snapshot;
     const wasNearBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 60;
 
-    messagesEl.innerHTML = state.messages
+    // The welcome message is a local greeting, not a stored message.
+    const welcome = `
+      <div class="row other">
+        <span class="sender-label">${escapeHtml(config.displayName)}</span>
+        <div class="bubble">${escapeHtml(config.welcomeMessage)}</div>
+      </div>`;
+
+    let body = messages
       .map((msg) => {
         const side = msg.role === "visitor" ? "visitor" : "other";
-        const label = senderLabel(msg);
+        const label = senderLabel(msg, agentName);
         return `
-          <div class="row ${side}">
-            ${label ? `<span class="sender-label">${label}</span>` : ""}
+          <div class="row ${side} ${msg.status}">
+            ${label ? `<span class="sender-label">${escapeHtml(label)}</span>` : ""}
             <div class="bubble">${escapeHtml(msg.text)}</div>
-          </div>
-        `;
+            ${messageMeta(msg)}
+          </div>`;
       })
       .join("");
 
-    if (state.remoteTyping) {
-      messagesEl.insertAdjacentHTML(
-        "beforeend",
-        `<div class="row other"><div class="typing-bubble" aria-label="Assistant is typing">
-          <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
-        </div></div>`,
-      );
+    if (messages.length === 0) {
+      body =
+        status === "connecting"
+          ? `<div class="empty">Loading your conversation…</div>`
+          : `<div class="empty">Send us a message — we usually reply in a few minutes.</div>`;
     }
 
-    if (wasNearBottom || state.messages.length <= 1) {
+    if (remoteTyping) {
+      body += `<div class="row other"><div class="typing-bubble" aria-label="Agent is typing">
+          <span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>
+        </div></div>`;
+    }
+
+    messagesEl.innerHTML = welcome + body;
+
+    if (wasNearBottom || messages.length <= 1) {
       messagesEl.scrollTop = messagesEl.scrollHeight;
     }
   }
 
   function render() {
+    const { snapshot } = state;
+    const unread = snapshot.messages.filter((m) => m.unread).length;
+
     panel.classList.toggle("open", state.open);
     launcher.setAttribute("aria-expanded", String(state.open));
-    presencePillEl.innerHTML = presencePill(state.presence);
+    presencePillEl.innerHTML = presencePill(snapshot);
+    banner.hidden = snapshot.status !== "error";
 
-    badge.hidden = state.unread === 0 || state.open;
-    badge.textContent = String(state.unread);
+    badge.hidden = unread === 0 || state.open;
+    badge.textContent = unread > 9 ? "9+" : String(unread);
+    launcher.setAttribute("aria-label", unread ? `Open chat, ${unread} unread` : "Open chat");
 
     sendBtn.disabled = textarea.value.trim().length === 0;
-
     renderMessages();
   }
 
-  function toggleOpen(nextOpen: boolean) {
-    setState({ open: nextOpen, unread: nextOpen ? 0 : state.unread });
-    if (nextOpen) {
+  function setOpen(open: boolean) {
+    state = { ...state, open };
+    if (open) {
+      connection.activate();
+      connection.markRead();
       window.setTimeout(() => textarea.focus(), 50);
     }
+    render();
   }
 
-  launcher.addEventListener("click", () => toggleOpen(!state.open));
-  closeBtn.addEventListener("click", () => toggleOpen(false));
-
+  launcher.addEventListener("click", () => setOpen(!state.open));
+  closeBtn.addEventListener("click", () => setOpen(false));
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && state.open) toggleOpen(false);
+    if (e.key === "Escape" && state.open) setOpen(false);
+  });
+
+  messagesEl.addEventListener("click", (e) => {
+    const target = e.target as HTMLElement;
+    const id = target.getAttribute("data-retry");
+    if (id) connection.retry(id);
   });
 
   textarea.addEventListener("input", () => {
@@ -234,6 +233,7 @@ function mountWidget(root: ShadowRoot, config: WidgetConfig, connection: Connect
     textarea.style.height = `${Math.min(textarea.scrollHeight, 88)}px`;
     connection.setVisitorTyping(textarea.value.length > 0);
   });
+  textarea.addEventListener("blur", () => connection.setVisitorTyping(false));
 
   function submit() {
     const text = textarea.value.trim();
@@ -253,49 +253,61 @@ function mountWidget(root: ShadowRoot, config: WidgetConfig, connection: Connect
     }
   });
 
-  connection.onPresence((status) => setState({ presence: status }));
-
-  connection.onMessage((msg) => {
-    const nextMessages = [...state.messages, msg];
-    const incomingFromOther = msg.role !== "visitor";
-    setState({
-      messages: nextMessages,
-      remoteTyping: false,
-      unread: incomingFromOther && !state.open ? state.unread + 1 : state.unread,
-    });
+  connection.subscribe((snapshot) => {
+    state = { ...state, snapshot };
+    // Messages that arrive while the chat is open are read immediately.
+    if (state.open && snapshot.messages.some((m) => m.unread)) connection.markRead();
+    render();
   });
 
-  connection.onRemoteTyping((isTyping) => setState({ remoteTyping: isTyping }));
-
-  render();
-  connection.connect();
+  connection.start();
 }
 
-function init() {
-  const siteId = getSiteId();
+// ---- boot --------------------------------------------------------------------
+
+const demoConfig = (siteId: string): WidgetConfig => ({
+  siteId,
+  displayName: "PulseDesk Demo Co.",
+  welcomeMessage: "Hi! 👋 Ask me anything — I'll get you to a human if needed.",
+  primaryColor: "#4B4FE0",
+  secondaryColor: "#EEF0FF",
+  widgetEnabled: true,
+  agentsOnline: false,
+});
+
+async function init() {
+  if (document.getElementById("pulsedesk-widget-root")) return; // already loaded on this page
+
+  const siteId = scriptTag?.getAttribute("data-site-id");
   if (!siteId) {
-    console.error("[PulseDesk-widget] Missing data-site-id on the widget <script> tag.");
-    return;
-  }
-  const userId = getUserId();
-  if (!userId) {
-    console.error("[PulseDesk-widget] Missing data-site-user-id on the widget <script> tag.");
+    console.error(`${LOG_PREFIX} Missing data-site-id on the widget <script> tag.`);
     return;
   }
 
-  const config = resolveConfig(siteId, userId);
-  const connection: Connection = createMockConnection(config);
+  const demo = scriptTag?.getAttribute("data-demo") === "true";
+  const api = createWidgetApi(API_BASE, siteId);
+
+  let config: WidgetConfig;
+  try {
+    config = demo ? demoConfig(siteId) : await api.getConfig();
+  } catch (err) {
+    console.warn(`${LOG_PREFIX} Chat is not available on this site:`, (err as Error).message);
+    return;
+  }
+  if (!config.widgetEnabled) return;
+
+  const connection = demo
+    ? createMockConnection(config)
+    : createRealConnection({ api, socketBase: SOCKET_BASE, config });
 
   const host = document.createElement("div");
   host.id = "pulsedesk-widget-root";
   document.body.appendChild(host);
-  const shadow = host.attachShadow({ mode: "open" });
-
-  mountWidget(shadow, config, connection);
+  mountWidget(host.attachShadow({ mode: "open" }), config, connection);
 }
 
 if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", init);
+  document.addEventListener("DOMContentLoaded", () => void init());
 } else {
-  init();
+  void init();
 }

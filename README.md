@@ -27,16 +27,49 @@ Prisma/NextAuth/Socket.io). This package is just the widget.
 
 ```
 src/
-  types.ts             Connection contract, message/state/config types
-  mock-connection.ts   Simulated backend — presence, AI replies, typing
+  types.ts             Connection contract, message/snapshot/config types
+  api.ts               PulseDesk widget REST API + visitor key storage
+  real-connection.ts   Real transport: REST for history/sending, Socket.io for live updates
+  mock-connection.ts   Offline demo transport (data-demo="true"), scripted replies
   styles.ts            CSS, tokens copied from the landing page's globals.css
-  widget.ts            Entry point: mounts Shadow DOM UI, wires everything up
+  widget.ts            Entry point: loads config, mounts Shadow DOM UI, wires everything up
 demo/
   index.html           Stand-in "customer site" with the widget embedded
 dist/
-  widget.js            Production bundle (minified, ~13KB, no deps)
-  widget.debug.js       Unminified build, used by demo/index.html
+  widget.js            Production bundle (minified, ~64KB / ~21KB gzip, includes socket.io-client)
+  widget.debug.js      Unminified build, used by demo/index.html
 ```
+
+## Install on a website
+
+```html
+<script src="https://<widget host>/widget.js" data-site-id="YOUR_SITE_ID" async></script>
+```
+
+`data-site-id` is the only attribute. Company admins copy the exact snippet
+from **Dashboard → Widget & Site**. Optional: `data-demo="true"` runs the
+offline mock (no backend).
+
+## How it talks to the backend
+
+1. `GET /widget/config?siteId=` — name, welcome message, colours, whether
+   the widget is enabled and whether any agent is online. If it fails (unknown
+   site, website not in the company's allowed list) or the widget is disabled,
+   nothing is rendered.
+2. `POST /widget/sessions` — creates or restores the visitor. The returned
+   `visitorKey` is kept in `localStorage` (`pulsedesk:<siteId>:visitorKey`),
+   so a refresh brings back the same visitor and history. **First-time
+   visitors get a session only when they open the chat**, so page views alone
+   never create customers.
+3. `GET /widget/conversations/active` + its messages — restores history.
+4. Socket.io (`/realtime/socket.io`, `widgetToken` in the handshake) for live
+   messages, agent typing, assignment and agent availability.
+5. Messages are sent over REST with a `clientMessageId`, so **Retry** after a
+   failure can never create a duplicate. The conversation is created on the
+   first message.
+6. After a reconnect the widget fetches `?after=<last message id>` to catch
+   up on anything it missed. An expired session token is renewed from the
+   visitor key automatically.
 
 ## Run the demo
 
@@ -48,60 +81,10 @@ pnpm lint
 npx serve .         # then open demo/index.html
 ```
 
-Reload the demo page a few times — presence randomly resolves to
-"Agent online" (signal/green) or "AI assistant" (amber), matching the
-status language from HANDOFF.md §4.
-
-The demo uses the mock transport. `data-site-id` and `data-site-user-id` are
-required by this pre-MVP mock; guest sessions and live API/realtime startup are
-later milestones. API/socket bases are injected at widget build time from the
-widget repository's `.env` file; customer embed snippets only provide
-`data-site-id`.
-
-## What's real vs. mocked right now
-
-| Piece | Status |
-|---|---|
-| UI, Shadow DOM isolation, state machine, a11y (focus, `Esc` to close, `aria-live`, reduced-motion) | **Real** |
-| `data-site-id` parsing | **Real** |
-| Config resolution (`resolveConfig` in `widget.ts`) | **Mocked** — hardcoded company name/branding |
-| Presence + messages (`mock-connection.ts`) | **Mocked** — random presence, canned AI replies, fake typing delays |
-| Socket.io connection | **Not implemented** — backend realtime integration is still in progress |
-
-## Swapping in the real backend
-
-Everything the UI needs from a transport is defined by the `Connection`
-interface in `src/types.ts`:
-
-```ts
-interface Connection {
-  connect: () => void;
-  disconnect: () => void;
-  sendMessage: (text: string) => void;
-  setVisitorTyping: (isTyping: boolean) => void;
-  onPresence: (cb: (status: PresenceStatus) => void) => void;
-  onMessage: (cb: (msg: ChatMessage) => void) => void;
-  onRemoteTyping: (cb: (isTyping: boolean) => void) => void;
-}
-```
-
-When the realtime layer exists:
-
-1. Create `src/real-connection.ts` exporting `createRealConnection(config): Connection`,
-   using `socket.io-client`, connecting to `SOCKET_BASE` scoped by `siteId`.
-2. In `widget.ts`, swap the import:
-   ```ts
-   // import { createMockConnection } from "./mock-connection";
-   import { createRealConnection } from "./real-connection";
-   // ...
-   const connection = createRealConnection(config);
-   ```
-3. Replace `resolveConfig()` in `widget.ts` with a real
-   `fetch(\`${API_BASE}/api/widget/config?siteId=...\`)` once the
-   `Company` model / widget-config endpoint exists (HANDOFF.md §6.1, §6.2).
-
-No changes needed anywhere else — `widget.ts`'s DOM/rendering code only
-talks to the `Connection` interface, never to the mock directly.
+`demo/index.html` uses `data-demo="true"` (offline mock). To try it against a
+local backend, remove `data-demo` and set `data-site-id` to a real company's
+site id. The API/socket bases are injected at build time from this
+repository's `.env` (`PULSEDESK_API_BASE`, `PULSEDESK_SOCKET_BASE`).
 
 ## Conventions followed (matching the main repo)
 

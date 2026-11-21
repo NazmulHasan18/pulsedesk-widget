@@ -21,6 +21,8 @@ export const CSS = /* css */ `
   --amber: #D98A1F;
   --amber-tint: #FBEDD8;
   --amber-ink: #9C6413;
+  --danger: #C2412D;
+  --danger-tint: #FBE7E3;
   --font-sans: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   --font-display: "Space Grotesk", var(--font-sans);
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -51,6 +53,7 @@ export const CSS = /* css */ `
 .launcher:focus-visible { outline: 2px solid var(--indigo-dark); outline-offset: 3px; }
 .launcher svg { width: 24px; height: 24px; }
 
+.badge[hidden] { display: none; }
 .badge {
   position: absolute;
   top: -4px;
@@ -129,6 +132,8 @@ export const CSS = /* css */ `
 .pill.agent .pill-dot { background: var(--signal); }
 .pill.ai { background: var(--amber-tint); color: var(--amber-ink); }
 .pill.ai .pill-dot { background: var(--amber); }
+.pill.away { background: var(--amber-tint); color: var(--amber-ink); }
+.pill.away .pill-dot { background: var(--amber); }
 .pill.connecting { background: var(--line); color: var(--muted); }
 .pill.connecting .pill-dot { background: var(--muted); }
 
@@ -143,6 +148,45 @@ export const CSS = /* css */ `
 }
 .close-btn:hover { background: var(--paper); color: var(--ink); }
 .close-btn:focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; }
+
+.banner {
+  padding: 8px 16px;
+  font-size: 12px;
+  line-height: 1.4;
+  background: var(--danger-tint);
+  color: var(--danger);
+  border-bottom: 1px solid var(--line);
+}
+.banner[hidden] { display: none; }
+
+.empty {
+  align-self: center;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.meta {
+  margin-top: 3px;
+  padding: 0 2px;
+  font-size: 10.5px;
+  color: var(--muted);
+}
+.meta.failed { color: var(--danger); }
+.retry-btn {
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--danger);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.retry-btn:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; border-radius: 2px; }
+.row.sending .bubble { opacity: 0.65; }
+.row.failed .bubble { opacity: 0.8; }
 
 .messages {
   flex: 1;
